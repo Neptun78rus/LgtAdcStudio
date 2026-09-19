@@ -20,45 +20,36 @@ void setup() {
 }
 
 void loop() {
-  // Если в буфере UART появились данные от Python
-  if (Serial.available() > 0) {
-    String input = Serial.readStringUntil('\n');
-    input.trim();
-    input.toUpperCase();
+    if (Serial.available() > 0) {
+        String input = Serial.readStringUntil('\n');
+        input.trim();
+        input.toUpperCase();
 
-    // Проверяем, что пришла именно команда переключения мультиплексора
-    if (input.startsWith("CHMUX=")) {
-      // Вытаскиваем числовое значение канала после знака "="
-      int channel_index = input.substring(6).toInt();
+        // Команда 1: Настройка мультиплексора
+        if (input.startsWith("CHMUX=")) {
+            int channel_index = input.substring(6).toInt();
+            if (channel_index >= 0 && channel_index <= 16) {
+                byte current_admux = ADMUX & 0xE0;
+                ADMUX = current_admux | (channel_index & 0x1F); // Записываем биты CHMUX
 
-      // Защита: индекс канала должен быть строго в пределах таблицы (0..16)
-      if (channel_index >= 0 && channel_index <= 16) {
+                // Сразу возвращаем подтверждение в Python
+                Serial.print(F("ADMUX_READY:0x"));
+                Serial.println(ADMUX, HEX);
+            }
+        }
 
-        digitalWrite(LED_PIN, HIGH); // Мигнем светодиодом в знак приема данных
+        // Команда 2: Ручной пуск одиночного преобразования АЦП
+        else if (input == "START_ADC") {
+            // Аппаратный запуск одиночного замера
+            bitSet(ADCSRA, ADSC);
+            while (bit_is_set(ADCSRA, ADSC)); // Ждем окончания оцифровки
+            uint16_t adc_raw = ADC; // Забираем 12 бит
 
-        // --- МАГИЯ ПЕРЕКЛЮЧЕНИЯ БИТОВ CHMUX ---
-        // 1. Сначала полностью очищаем младшие 5 бит (биты 4, 3, 2, 1, 0) в регистре ADMUX,
-        // чтобы не испортить старшие биты REFS0, REFS1 и ADLAR.
-        // Маска 0xE0 (1110 0000 в двоичной) сохраняет старшие биты и зануляет CHMUX.
-        byte current_admux = ADMUX & 0xE0;
-
-        // 2. Накладываем наше число (индекс канала) на очищенное место.
-        // Так как биты CHMUX[4:0] занимают позиции с 0 по 4, сдвигать число не нужно!
-        // Маска 0x1F (0001 1111) гарантирует, что мы не вылезем за пределы 5 бит.
-        ADMUX = current_admux | (channel_index & 0x1F);
-
-        // 3. Делаем один пробный замер, чтобы АЦП аппаратно переключил коммутатор
-        bitSet(ADCSRA, ADSC);
-        while (bit_is_set(ADCSRA, ADSC));
-
-        digitalWrite(LED_PIN, LOW);
-
-        // Отправляем ответ в Python, что регистр успешно обновлен
-        Serial.print(F("✅ МК принял команду! ADMUX установлен в: 0x"));
-        Serial.println(ADMUX, HEX);
-      } else {
-        Serial.println(F("❌ Ошибка: Индекс канала вне диапазона (0..16)"));
-      }
+            // Отправляем строго один пакет обратно в Python
+            Serial.print(F("ADC:"));
+            Serial.print(adc_raw);
+            Serial.print(F(","));
+            Serial.println(ADMUX);
+        }
     }
-  }
 }
