@@ -104,6 +104,15 @@ class SerialWorker(threading.Thread):
 # 5. ГЛАВНОЕ ОКНО ПРИЛОЖЕНИЯ (КАРКАС)
 # ==========================================
 class MainWindow(tk.Tk):
+    def request_hardware_sync(self):
+        """ Отправляет в МК запрос на выгрузку всех калибровочных и управляющих регистров """
+        if self.worker and self.worker.is_alive():
+            print("Шлем запрос синхронизации регистров в МК...")
+            # Отправляем пакет типа 0x02. В качестве данных шлем байт 0xFF (флаг общего запроса)
+            self.worker.send_packet(0x02, bytes([0xFF]))
+        else:
+            messagebox.showwarning("Ошибка связи", "Сначала откройте COM-порт микроконтроллера!")
+
     def refresh_com_ports(self):
         """ Автоматически сканирует систему на наличие доступных tty/COM портов """
         try:
@@ -166,6 +175,9 @@ class MainWindow(tk.Tk):
 
         # Запускаем первичный поиск портов при старте окна
         self.refresh_com_ports()
+        # --- Добавляем кнопку Синхронизации в панель подключения ---
+        self.btn_sync = ttk.Button(conn_frame, text="🔄 Синхронизация", state=tk.DISABLED, command=self.request_hardware_sync)
+        self.btn_sync.pack(side=tk.LEFT, padx=10)
 
 
         self.demo_var = tk.BooleanVar(value=True)
@@ -373,6 +385,7 @@ class MainWindow(tk.Tk):
 
         self.btn_start.config(state=tk.DISABLED)
         self.btn_stop.config(state=tk.NORMAL)
+        self.btn_sync.config(state=tk.NORMAL)
         self.btn_single.config(state=tk.NORMAL)
         self.btn_cont.config(state=tk.NORMAL)
         self.btn_stop_adc.config(state=tk.NORMAL)
@@ -382,6 +395,7 @@ class MainWindow(tk.Tk):
             self.worker.stop()
         self.btn_start.config(state=tk.NORMAL)
         self.btn_stop.config(state=tk.DISABLED)
+        self.btn_sync.config(state=tk.DISABLED)
         self.btn_single.config(state=tk.DISABLED)
         self.btn_cont.config(state=tk.DISABLED)
         self.btn_stop_adc.config(state=tk.DISABLED)
@@ -408,8 +422,36 @@ class MainWindow(tk.Tk):
                 if hasattr(self, 'chart_window') and self.chart_window.winfo_exists():
                     self.chart_window.add_sample(raw_val)
 
-            elif msg["type"] == 0x02:  # Синхронизация регистров (если МК прислал байт)
-                pass
+            elif msg["type"] == 0x02:  # МК прислал данные регистра для синхронизации
+                payload = msg["data"]  # Ожидаем 2 байта: [Адрес_Регистра, Значение_Регистра]
+                if len(payload) >= 2:
+                    reg_addr_hex = f"0x{payload[0]:02X}"
+                    reg_val = payload[1]
+
+                    # Бежим по всей нашей базе данных и ищем, какому регистру принадлежит этот адрес
+                    found = False
+                    for reg_name, reg_info in adc_registers_data.items():
+                        if reg_info["address"].upper() == reg_addr_hex.upper():
+                            # Нашли совпадение! Обновляем живое значение в базе
+                            reg_info["current_value"] = reg_val
+
+                            # Также обновляем внутренние флаги state для всех битов этого регистра
+                            for idx, bit_info in enumerate(reg_info["bits"]):
+                                # Считаем позицию бита (от 7 к 0)
+                                bit_pos = 7 - idx
+                                bit_info["state"] = (reg_val >> bit_pos) & 0x01
+
+                            print(f" Синхронизирован регистр {reg_name} ({reg_addr_hex}) = 0x{reg_val:02X}")
+                            found = True
+                            break
+
+                    if found:
+                        # Принудительно перерисовываем главную таблицу Treeview
+                        self.update_table_view()
+
+                        # Если окно векторной схемы сейчас открыто, заставляем его тоже перерисовать зеленые линии!
+                        if hasattr(self, 'schematic_window') and self.schematic_window.winfo_exists():
+                            self.schematic_window.update_schematic()
 
         # Перевызов через 10мс (как прерывание)
         self.after(10, self.poll_queue)
