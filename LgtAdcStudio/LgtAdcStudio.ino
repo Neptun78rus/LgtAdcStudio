@@ -40,8 +40,21 @@ void loop() {
                     // Калибровочные: 0xC8 (VCAL), 0xD1 (VCAL1), 0xCE (VCAL2), 0xCC (VCAL3)
                     // ТЕПЕРЬ СТРОГО ПО ВАШЕМУ ДАТАШИТУ (Для выгрузки в ПК):
                     uint8_t target_registers[] = {
-                        0x7C,  // ADMUX (из таблицы)
+
                         0x7A,  // ADCSRA (из таблицы)
+                        0x7B,
+                        0x7C,
+                        0x7D,
+                        0x7E,
+                        0x7F,
+                        0xDC,
+                        0xA3,
+                        0xA4,
+                        0xA5,
+                        0xA6,
+                        0xAA,
+                        0xAB,
+                        0xAC,
                         0xAD,  // ADCSRD (из таблицы)
                         0xC8,  // VCAL
                         0xCD,  // VCAL1
